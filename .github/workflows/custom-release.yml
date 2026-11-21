@@ -1,0 +1,178 @@
+name: Build custom releases
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Upstream stable tag; leave empty for latest'
+        default: ''
+      revision:
+        description: 'Custom revision (1-9999)'
+        default: '1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: custom-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      publish: ${{ steps.upstream.outputs.publish }}
+      version: ${{ steps.upstream.outputs.version }}
+      upstream_sha: ${{ steps.upstream.outputs.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Select an unreleased upstream version
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.upstream_tag }}
+          CUSTOM_REVISION: ${{ inputs.revision || '1' }}
+        run: |
+          set -euo pipefail
+          tag="$REQUESTED_TAG"
+          if [ -z "$tag" ]; then
+            tag=$(gh api repos/rikkahub/rikkahub/releases/latest --jq .tag_name)
+          fi
+          [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CUSTOM_REVISION" =~ ^[1-9][0-9]{0,3}$ ]]
+          version="${tag#v}-custom.$CUSTOM_REVISION"
+          releases=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName)
+          if jq -e --arg tag "$version" '
+            def parts: capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)-custom\\.(?<revision>[0-9]+)$")
+              | [.major, .minor, .patch, .revision] | map(tonumber);
+            ($tag | parts) as $requested
+            | any(.[]; try ((.tagName | parts) >= $requested) catch false)
+          ' <<< "$releases" >/dev/null; then
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git clone --depth 1 --branch "$tag" https://github.com/rikkahub/rikkahub.git source
+          {
+            echo "sha=$(git -C source rev-parse HEAD)"
+            echo "version=$version"
+            echo 'publish=true'
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: steps.upstream.outputs.publish == 'true'
+        with:
+          node-version: '22'
+      - name: Apply and check customization
+        if: steps.upstream.outputs.publish == 'true'
+        run: |
+          node custom/cx_apply_customizations.mjs source
+          git -C source diff --check
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        if: steps.upstream.outputs.publish == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        if: steps.upstream.outputs.publish == 'true'
+        with:
+          version: '11'
+      - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        if: steps.upstream.outputs.publish == 'true'
+        with:
+          gradle-version: '9.6.0'
+      - name: Install frontend dependencies
+        if: steps.upstream.outputs.publish == 'true'
+        working-directory: source/web-ui
+        run: pnpm install --frozen-lockfile
+      - name: Build unsigned release and run JVM tests
+        if: steps.upstream.outputs.publish == 'true'
+        working-directory: source
+        env:
+          CUSTOM_REVISION: ${{ inputs.revision || '1' }}
+        run: |
+          set -euo pipefail
+          date -u +%Y-%m-%dT%H:%M:%SZ > ../cx_build_start.txt
+          gradle :app:assembleGithubRelease :app:testGithubReleaseUnitTest --no-daemon --max-workers=2 --console=plain -Dorg.gradle.jvmargs=-Xmx6g -PcustomRevision="$CUSTOM_REVISION" 2>&1 | tee ../cx_build.log
+          echo RUN_COMPLETE >> ../cx_build.log
+      - name: Enable emulator acceleration
+        if: steps.upstream.outputs.publish == 'true'
+        run: sudo chmod 666 /dev/kvm
+      - name: Verify sharing on Android
+        if: steps.upstream.outputs.publish == 'true'
+        uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 36
+          arch: x86_64
+          working-directory: source
+          script: gradle :app:connectedGithubDebugAndroidTest --no-daemon --max-workers=2 --console=plain -Dorg.gradle.jvmargs=-Xmx6g -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.SharedImagesTest
+      - name: Prepare release inputs
+        if: steps.upstream.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p unsigned
+          apk=source/app/build/outputs/apk/github/release/app-github-arm64-v8a-release-unsigned.apk
+          test -s "$apk"
+          cp "$apk" unsigned/rikkahub-custom-arm64-v8a.apk
+          cp custom/cx_image-sharing.patch unsigned/
+          git -C source rev-parse HEAD > unsigned/UPSTREAM_COMMIT
+          tar --exclude=.git --exclude=build --exclude=.gradle --exclude=.kotlin --exclude=.cxx --exclude=node_modules --exclude=local.properties -czf unsigned/custom-source.tar.gz -C source .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.upstream.outputs.publish == 'true'
+        with:
+          name: unsigned-release
+          path: unsigned/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && steps.upstream.outputs.publish == 'true'
+        with:
+          name: build-evidence
+          path: |
+            cx_build_start.txt
+            cx_build.log
+            source/app/build/test-results/
+            source/app/build/reports/androidTests/
+          retention-days: 14
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+      - name: Download verified build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --name unsigned-release --dir release
+      - name: Sign and verify APK
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/rikkahub-release.p12"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$SIGNING_KEY_BASE64" | base64 --decode > "$key"
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$build_tools/apksigner" sign --ks "$key" --ks-key-alias rikkahub-custom --ks-pass env:SIGNING_PASSWORD --key-pass env:SIGNING_PASSWORD release/rikkahub-custom-arm64-v8a.apk
+          "$build_tools/apksigner" verify --print-certs release/rikkahub-custom-arm64-v8a.apk | tee release/SIGNING_CERTIFICATE.txt
+          grep -qi '30d281ceeaaf72ad1eb4cb47371f16f25da90ed97a3698a65dbd7565a713137a' release/SIGNING_CERTIFICATE.txt
+          node custom/cx_release_metadata.mjs release/rikkahub-custom-arm64-v8a.apk "$build_tools/aapt"
+      - name: Publish custom update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(jq -r .version release/update.json)" = "$RELEASE_VERSION"
+          gh release create "$RELEASE_VERSION" release/rikkahub-custom-arm64-v8a.apk release/update.json release/SHA256SUMS release/SIGNING_CERTIFICATE.txt release/UPSTREAM_COMMIT release/cx_image-sharing.patch release/custom-source.tar.gz --target "$GITHUB_SHA" --title "RikkaHub Custom $RELEASE_VERSION" --notes-file release/release-notes.md --latest

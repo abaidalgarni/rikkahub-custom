@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
+import androidx.core.net.toFile
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
@@ -65,6 +66,9 @@ import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
@@ -172,18 +176,21 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text) {
         if (files.isNotEmpty()) {
-            val localFiles = filesManager.createChatFilesByContents(files)
-            val contentTypes = files.mapNotNull { file ->
-                filesManager.getFileMimeType(file)
+            val attachments = withContext(Dispatchers.IO) {
+                files.flatMap { source ->
+                    val mimeType = filesManager.getFileMimeType(source)
+                    filesManager.createChatFilesByContents(listOf(source)).map { local ->
+                        local to (mimeType ?: FileUtils.guessMimeType(local.toFile(), local.lastPathSegment.orEmpty()))
+                    }
+                }
             }
             val parts = buildList {
-                localFiles.forEachIndexed { index, file ->
-                    val type = contentTypes.getOrNull(index)
-                    if (type?.startsWith("image/") == true) {
+                attachments.forEach { (file, type) ->
+                    if (type.startsWith("image/")) {
                         add(UIMessagePart.Image(url = file.toString()))
-                    } else if (type?.startsWith("video/") == true) {
+                    } else if (type.startsWith("video/")) {
                         add(UIMessagePart.Video(url = file.toString()))
-                    } else if (type?.startsWith("audio/") == true) {
+                    } else if (type.startsWith("audio/")) {
                         add(UIMessagePart.Audio(url = file.toString()))
                     }
                 }

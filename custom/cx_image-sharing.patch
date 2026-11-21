@@ -1,0 +1,494 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 763ede3..3b4ae4b 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -54,7 +54,7 @@
+     android:enableOnBackInvokedCallback="true"
+     android:fullBackupContent="@xml/backup_rules"
+     android:icon="@mipmap/ic_launcher"
+-    android:label="@string/app_name"
++    android:label="RikkaHub Custom"
+     android:networkSecurityConfig="@xml/network_security_config"
+     android:supportsRtl="true"
+     android:theme="@style/Theme.Rikkahub"
+@@ -83,6 +83,12 @@
+         <category android:name="android.intent.category.DEFAULT" />
+ 
+         <data android:mimeType="text/plain" />
++        <data android:mimeType="image/*" />
++      </intent-filter>
++      <intent-filter>
++        <action android:name="android.intent.action.SEND_MULTIPLE" />
++        <category android:name="android.intent.category.DEFAULT" />
++        <data android:mimeType="image/*" />
+       </intent-filter>
+       <intent-filter>
+         <action android:name="android.intent.action.PROCESS_TEXT" />
+diff --git a/app/src/main/java/me/rerere/rikkahub/RouteActivity.kt b/app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
+index 4b6e25b..e4a8eb7 100644
+--- a/app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
++++ b/app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
+@@ -139,6 +139,7 @@ import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
+ import me.rerere.rikkahub.ui.pages.webview.WebViewPage
+ import me.rerere.rikkahub.ui.theme.RikkahubTheme
+ import me.rerere.rikkahub.utils.CrashHandler
++import me.rerere.rikkahub.utils.sharedImageUris
+ import me.rerere.rikkahub.utils.openUsageAccessSettings
+ import okhttp3.OkHttpClient
+ import org.koin.android.ext.android.inject
+@@ -242,9 +243,9 @@ class RouteActivity : ComponentActivity() {
+                 openNewMediaCreation(backStack)
+                 null
+             }
+-            Intent.ACTION_SEND -> Screen.ShareHandler(
+-                text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty(),
+-                streamUri = intent.getStringExtra(Intent.EXTRA_STREAM),
++            Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> Screen.ShareHandler(
++                text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty(),
++                streamUris = intent.sharedImageUris(packageName).map { it.toString() },
+             )
+             Intent.ACTION_PROCESS_TEXT -> Screen.ShareHandler(
+                 text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty(),
+@@ -366,7 +367,7 @@ class RouteActivity : ComponentActivity() {
+                             entry<Screen.ShareHandler> { key ->
+                                 ShareHandlerPage(
+                                     text = key.text,
+-                                    image = key.streamUri
++                                    images = key.streamUris
+                                 )
+                             }
+ 
+@@ -660,7 +661,7 @@ sealed interface Screen : NavKey {
+     ) : Screen
+ 
+     @Serializable
+-    data class ShareHandler(val text: String, val streamUri: String? = null) : Screen
++    data class ShareHandler(val text: String, val streamUris: List<String> = emptyList()) : Screen
+ 
+     @Serializable
+     data object History : Screen
+diff --git a/app/src/main/java/me/rerere/rikkahub/di/AppModule.kt b/app/src/main/java/me/rerere/rikkahub/di/AppModule.kt
+index 34394f8..68d6d5f 100644
+--- a/app/src/main/java/me/rerere/rikkahub/di/AppModule.kt
++++ b/app/src/main/java/me/rerere/rikkahub/di/AppModule.kt
+@@ -1,8 +1,5 @@
+ package me.rerere.rikkahub.di
+ 
+-import com.google.firebase.Firebase
+-import com.google.firebase.analytics.analytics
+-import com.google.firebase.crashlytics.crashlytics
+ import kotlinx.serialization.json.Json
+ import me.rerere.rikkahub.AppScope
+ import me.rerere.rikkahub.data.ai.ChatRequestFactory
+@@ -60,14 +57,6 @@ val appModule = module {
+         TTSManager(get())
+     }
+ 
+-    single {
+-        Firebase.crashlytics
+-    }
+-
+-    single {
+-        Firebase.analytics
+-    }
+-
+     single {
+         SoundEffectPlayer(get())
+     }
+diff --git a/app/src/main/java/me/rerere/rikkahub/di/ViewModelModule.kt b/app/src/main/java/me/rerere/rikkahub/di/ViewModelModule.kt
+index e47d136..3329a1f 100644
+--- a/app/src/main/java/me/rerere/rikkahub/di/ViewModelModule.kt
++++ b/app/src/main/java/me/rerere/rikkahub/di/ViewModelModule.kt
+@@ -36,7 +36,6 @@ val viewModelModule = module {
+             settingsStore = get(),
+             chatService = get(),
+             updateChecker = get(),
+-            analytics = get(),
+             filesManager = get(),
+             favoriteRepository = get(),
+             backgroundShellManager = get(),
+diff --git a/app/src/main/java/me/rerere/rikkahub/service/WorkspaceDocumentsProvider.kt b/app/src/main/java/me/rerere/rikkahub/service/WorkspaceDocumentsProvider.kt
+index d238dd4..46a9f2e 100644
+--- a/app/src/main/java/me/rerere/rikkahub/service/WorkspaceDocumentsProvider.kt
++++ b/app/src/main/java/me/rerere/rikkahub/service/WorkspaceDocumentsProvider.kt
+@@ -53,7 +53,7 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
+         cursor.newRow().apply {
+             add(Root.COLUMN_ROOT_ID, ROOT_ID)
+             add(Root.COLUMN_DOCUMENT_ID, ROOT_DOC_ID)
+-            add(Root.COLUMN_TITLE, ctx.getString(R.string.app_name))
++            add(Root.COLUMN_TITLE, ctx.applicationInfo.loadLabel(ctx.packageManager))
+             add(
+                 Root.COLUMN_FLAGS,
+                 Root.FLAG_LOCAL_ONLY or Root.FLAG_SUPPORTS_IS_CHILD or Root.FLAG_SUPPORTS_CREATE,
+@@ -70,7 +70,7 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
+         if (target.isRoot) {
+             cursor.newRow().apply {
+                 add(Document.COLUMN_DOCUMENT_ID, ROOT_DOC_ID)
+-                add(Document.COLUMN_DISPLAY_NAME, context?.getString(R.string.app_name))
++                add(Document.COLUMN_DISPLAY_NAME, context?.let { it.applicationInfo.loadLabel(it.packageManager) })
+                 add(Document.COLUMN_MIME_TYPE, Document.MIME_TYPE_DIR)
+                 add(Document.COLUMN_FLAGS, 0)
+                 add(Document.COLUMN_SIZE, null)
+diff --git a/app/src/main/java/me/rerere/rikkahub/ui/activity/ShortcutHandlerActivity.kt b/app/src/main/java/me/rerere/rikkahub/ui/activity/ShortcutHandlerActivity.kt
+index 5979d13..45a63e5 100644
+--- a/app/src/main/java/me/rerere/rikkahub/ui/activity/ShortcutHandlerActivity.kt
++++ b/app/src/main/java/me/rerere/rikkahub/ui/activity/ShortcutHandlerActivity.kt
+@@ -27,7 +27,8 @@ class ShortcutHandlerActivity : ComponentActivity() {
+             photoURI?.let {
+                 val intent = Intent(this, RouteActivity::class.java).apply {
+                     action = Intent.ACTION_SEND
+-                    putExtra(Intent.EXTRA_STREAM, it.toString())
++                    type = "image/jpeg"
++                    putExtra(Intent.EXTRA_STREAM, it)
+                 }
+                 startActivity(intent)
+             }
+diff --git a/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatPage.kt b/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatPage.kt
+index b7c9719..6267cf8 100644
+--- a/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatPage.kt
++++ b/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatPage.kt
+@@ -1,6 +1,7 @@
+ package me.rerere.rikkahub.ui.pages.chat
+ 
+ import android.net.Uri
++import androidx.core.net.toFile
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.BackHandler
+ import androidx.compose.foundation.layout.Box
+@@ -65,6 +66,9 @@ import dev.chrisbanes.haze.rememberHazeState
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.launch
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import me.rerere.rikkahub.data.files.FileUtils
+ import me.rerere.ai.provider.Model
+ import me.rerere.ai.provider.ProviderSetting
+ import me.rerere.ai.ui.UIMessagePart
+@@ -172,18 +176,21 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
+     // 初始化输入状态（处理传入的 files 和 text 参数）
+     LaunchedEffect(files, text) {
+         if (files.isNotEmpty()) {
+-            val localFiles = filesManager.createChatFilesByContents(files)
+-            val contentTypes = files.mapNotNull { file ->
+-                filesManager.getFileMimeType(file)
++            val attachments = withContext(Dispatchers.IO) {
++                files.flatMap { source ->
++                    val mimeType = filesManager.getFileMimeType(source)
++                    filesManager.createChatFilesByContents(listOf(source)).map { local ->
++                        local to (mimeType ?: FileUtils.guessMimeType(local.toFile(), local.lastPathSegment.orEmpty()))
++                    }
++                }
+             }
+             val parts = buildList {
+-                localFiles.forEachIndexed { index, file ->
+-                    val type = contentTypes.getOrNull(index)
+-                    if (type?.startsWith("image/") == true) {
++                attachments.forEach { (file, type) ->
++                    if (type.startsWith("image/")) {
+                         add(UIMessagePart.Image(url = file.toString()))
+-                    } else if (type?.startsWith("video/") == true) {
++                    } else if (type.startsWith("video/")) {
+                         add(UIMessagePart.Video(url = file.toString()))
+-                    } else if (type?.startsWith("audio/") == true) {
++                    } else if (type.startsWith("audio/")) {
+                         add(UIMessagePart.Audio(url = file.toString()))
+                     }
+                 }
+diff --git a/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt b/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt
+index 5cc6507..9703abf 100644
+--- a/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt
++++ b/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt
+@@ -12,7 +12,6 @@ import androidx.compose.ui.tooling.preview.Preview
+ import androidx.core.net.toUri
+ import androidx.lifecycle.ViewModel
+ import androidx.lifecycle.viewModelScope
+-import com.google.firebase.analytics.FirebaseAnalytics
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.flow.SharedFlow
+ import kotlinx.coroutines.flow.SharingStarted
+@@ -62,7 +61,6 @@ class ChatVM(
+     private val settingsStore: SettingsStore,
+     private val chatService: ChatService,
+     val updateChecker: UpdateChecker,
+-    private val analytics: FirebaseAnalytics,
+     private val filesManager: FilesManager,
+     private val favoriteRepository: FavoriteRepository,
+     private val backgroundShellManager: BackgroundShellManager,
+@@ -245,14 +243,12 @@ class ChatVM(
+      */
+     fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
+         if (content.isEmptyInputMessage()) return
+-        analytics.logEvent("ai_send_message", null)
+ 
+         chatService.sendMessage(_conversationId, content, answer)
+     }
+ 
+     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
+         if (parts.isEmptyInputMessage()) return
+-        analytics.logEvent("ai_edit_message", null)
+ 
+         viewModelScope.launch {
+             chatService.editMessage(_conversationId, messageId, parts)
+@@ -286,7 +282,6 @@ class ChatVM(
+     }
+ 
+     fun regenerateAtMessage(message: UIMessage) {
+-        analytics.logEvent("ai_regenerate_at_message", null)
+         chatService.regenerateAtMessage(_conversationId, message.id)
+     }
+ 
+@@ -295,7 +290,6 @@ class ChatVM(
+         approved: Boolean,
+         reason: String = ""
+     ) {
+-        analytics.logEvent("ai_tool_approval", null)
+         chatService.handleToolApproval(_conversationId, toolCallId, approved, reason)
+     }
+ 
+@@ -303,7 +297,6 @@ class ChatVM(
+         toolCallId: String,
+         answer: String,
+     ) {
+-        analytics.logEvent("ai_tool_answer", null)
+         chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
+     }
+ 
+diff --git a/app/src/main/java/me/rerere/rikkahub/ui/pages/share/handler/ShareHandlerPage.kt b/app/src/main/java/me/rerere/rikkahub/ui/pages/share/handler/ShareHandlerPage.kt
+index a248447..1a31cdb 100644
+--- a/app/src/main/java/me/rerere/rikkahub/ui/pages/share/handler/ShareHandlerPage.kt
++++ b/app/src/main/java/me/rerere/rikkahub/ui/pages/share/handler/ShareHandlerPage.kt
+@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.PaddingValues
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.heightIn
+ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.lazy.items
+@@ -36,7 +37,7 @@ import org.koin.androidx.compose.koinViewModel
+ import org.koin.core.parameter.parametersOf
+ 
+ @Composable
+-fun ShareHandlerPage(text: String, image: String?) {
++fun ShareHandlerPage(text: String, images: List<String>) {
+     val vm: ShareHandlerVM = koinViewModel(parameters = { parametersOf(text) })
+     val settings by vm.settings.collectAsStateWithLifecycle()
+     val scope = rememberCoroutineScope()
+@@ -69,11 +70,11 @@ fun ShareHandlerPage(text: String, image: String?) {
+                             style = MaterialTheme.typography.bodySmall
+                         )
+ 
+-                        image?.let {
++                        images.forEachIndexed { index, image ->
+                             AsyncImage(
+-                                model = it,
+-                                contentDescription = null,
+-                                modifier = Modifier.fillMaxWidth()
++                                model = image,
++                                contentDescription = "Shared image ${index + 1}",
++                                modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)
+                             )
+                         }
+                     }
+@@ -88,7 +89,7 @@ fun ShareHandlerPage(text: String, image: String?) {
+                             navigateToChatPage(
+                                 navigator = navController,
+                                 initText = vm.shareText.base64Encode(),
+-                                initFiles = image?.let { listOf(it.toUri()) } ?: emptyList()
++                                initFiles = images.map { it.toUri() }
+                             )
+                         }
+                     },
+diff --git a/app/src/main/java/me/rerere/rikkahub/utils/UpdateChecker.kt b/app/src/main/java/me/rerere/rikkahub/utils/UpdateChecker.kt
+index 7776245..f0b2ae8 100644
+--- a/app/src/main/java/me/rerere/rikkahub/utils/UpdateChecker.kt
++++ b/app/src/main/java/me/rerere/rikkahub/utils/UpdateChecker.kt
+@@ -21,7 +21,8 @@ import me.rerere.rikkahub.BuildConfig
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
+ 
+-private const val API_URL = "https://updates.rikka-ai.com/"
++private const val API_URL =
++    "https://github.com/abaidalgarni/rikkahub-custom/releases/latest/download/update.json"
+ 
+ class UpdateChecker(
+     private val client: OkHttpClient,
+diff --git a/app/src/main/res/xml/shortcuts.xml b/app/src/main/res/xml/shortcuts.xml
+index 0dfd6dd..d9f9732 100644
+--- a/app/src/main/res/xml/shortcuts.xml
++++ b/app/src/main/res/xml/shortcuts.xml
+@@ -9,6 +9,7 @@
+         <intent
+             android:action="android.intent.action.VIEW"
+             android:targetClass="me.rerere.rikkahub.ui.activity.ShortcutHandlerActivity"
++            android:targetPackage="dev.abaidalgarni.rikkahub"
+             android:data="rikkahub://shortcut" />
+         <categories android:name="android.shortcut.conversation" />
+     </shortcut>
+@@ -20,7 +21,8 @@
+         android:shortcutLongLabel="@string/translator_page_title">
+         <intent
+             android:action="me.rerere.rikkahub.action.TRANSLATE"
+-            android:targetClass="me.rerere.rikkahub.RouteActivity" />
++            android:targetClass="me.rerere.rikkahub.RouteActivity"
++            android:targetPackage="dev.abaidalgarni.rikkahub" />
+     </shortcut>
+     <shortcut
+         android:shortcutId="media_creation"
+@@ -30,6 +32,7 @@
+         android:shortcutLongLabel="@string/shortcut_media_creation">
+         <intent
+             android:action="me.rerere.rikkahub.action.MEDIA_CREATION"
+-            android:targetClass="me.rerere.rikkahub.RouteActivity" />
++            android:targetClass="me.rerere.rikkahub.RouteActivity"
++            android:targetPackage="dev.abaidalgarni.rikkahub" />
+     </shortcut>
+ </shortcuts>
+diff --git a/app/src/main/java/me/rerere/rikkahub/utils/SharedImages.kt b/app/src/main/java/me/rerere/rikkahub/utils/SharedImages.kt
+new file mode 100644
+index 0000000..5aea5a1
+--- /dev/null
++++ b/app/src/main/java/me/rerere/rikkahub/utils/SharedImages.kt
+@@ -0,0 +1,26 @@
++package me.rerere.rikkahub.utils
++
++import android.content.Intent
++import android.net.Uri
++import androidx.core.content.IntentCompat
++
++/** Read Android share attachments without accepting file paths into this app's private storage. */
++internal fun Intent.sharedImageUris(packageName: String): List<Uri> {
++    if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return emptyList()
++    val streams = runCatching {
++        if (action == Intent.ACTION_SEND_MULTIPLE) {
++            IntentCompat.getParcelableArrayListExtra(this, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
++        } else {
++            listOfNotNull(IntentCompat.getParcelableExtra(this, Intent.EXTRA_STREAM, Uri::class.java))
++        }
++    }.getOrDefault(emptyList())
++    val attachments = streams.ifEmpty {
++        val clip = clipData
++        if (clip == null) emptyList() else (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
++    }
++    return attachments.filter { uri ->
++        uri.scheme == "content" &&
++            (uri.authority != "$packageName.fileprovider" || uri.path == "/cache/shortcut_camera_image.jpg") &&
++            uri.authority != "$packageName.documents"
++    }.distinct()
++}
+diff --git a/app/src/androidTest/java/me/rerere/rikkahub/SharedImagesTest.kt b/app/src/androidTest/java/me/rerere/rikkahub/SharedImagesTest.kt
+new file mode 100644
+index 0000000..a382a99
+--- /dev/null
++++ b/app/src/androidTest/java/me/rerere/rikkahub/SharedImagesTest.kt
+@@ -0,0 +1,109 @@
++package me.rerere.rikkahub
++
++import android.content.ClipData
++import android.content.Intent
++import android.content.pm.PackageManager
++import android.net.Uri
++import android.text.SpannableString
++import androidx.test.ext.junit.runners.AndroidJUnit4
++import androidx.test.platform.app.InstrumentationRegistry
++import me.rerere.rikkahub.utils.sharedImageUris
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++
++@RunWith(AndroidJUnit4::class)
++class SharedImagesTest {
++    private val context = InstrumentationRegistry.getInstrumentation().targetContext
++    private val first = Uri.parse("content://media/external/images/media/101")
++    private val second = Uri.parse("content://media/external/images/media/102")
++
++    @Test
++    fun readsParcelableStreamAndPreservesStyledCaption() {
++        val intent = Intent(Intent.ACTION_SEND).apply {
++            type = "image/png"
++            putExtra(Intent.EXTRA_STREAM, first)
++            putExtra(Intent.EXTRA_TEXT, SpannableString("Image caption"))
++        }
++        assertEquals(listOf(first), intent.sharedImageUris(context.packageName))
++        assertEquals("Image caption", intent.getCharSequenceExtra(Intent.EXTRA_TEXT).toString())
++    }
++
++    @Test
++    fun readsMultipleImagesInOrderWithoutDuplicates() {
++        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
++            type = "image/*"
++            putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(first, second, first))
++        }
++        assertEquals(listOf(first, second), intent.sharedImageUris(context.packageName))
++    }
++
++    @Test
++    fun supportsClipDataOnlySenders() {
++        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
++            type = "image/*"
++            clipData = ClipData.newRawUri("First image", first).apply { addItem(ClipData.Item(second)) }
++        }
++        assertEquals(listOf(first, second), intent.sharedImageUris(context.packageName))
++    }
++
++    @Test
++    fun streamExtraTakesPrecedenceOverDuplicateClipData() {
++        val intent = Intent(Intent.ACTION_SEND).apply {
++            putExtra(Intent.EXTRA_STREAM, first)
++            clipData = ClipData.newRawUri("First image", first)
++        }
++        assertEquals(listOf(first), intent.sharedImageUris(context.packageName))
++    }
++
++    @Test
++    fun textSharesDoNotCreateAttachments() {
++        val intent = Intent(Intent.ACTION_SEND).apply {
++            type = "text/plain"
++            putExtra(Intent.EXTRA_TEXT, "A text share")
++        }
++        assertTrue(intent.sharedImageUris(context.packageName).isEmpty())
++    }
++
++    @Test
++    fun doesNotInterpretAStringAsAnImageUri() {
++        val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, first.toString())
++        assertTrue(intent.sharedImageUris(context.packageName).isEmpty())
++    }
++
++    @Test
++    fun rejectsPrivatePathsAndSelfProviderUris() {
++        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
++            putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(
++                Uri.parse("file:///data/data/${context.packageName}/files/settings.json"),
++                Uri.parse("content://${context.packageName}.fileprovider/files/settings.json"),
++                Uri.parse("content://${context.packageName}.documents/workspace"),
++                first
++            ))
++        }
++        assertEquals(listOf(first), intent.sharedImageUris(context.packageName))
++    }
++
++    @Test
++    fun preservesTheAppsCameraShortcut() {
++        val image = Uri.parse("content://${context.packageName}.fileprovider/cache/shortcut_camera_image.jpg")
++        val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, image)
++        assertEquals(listOf(image), intent.sharedImageUris(context.packageName))
++    }
++
++    @Test
++    fun registersSingleAndMultipleImageShares() {
++        for (action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) {
++            for (mime in listOf("image/png", "image/jpeg", "image/webp")) {
++                val matches = context.packageManager.queryIntentActivities(
++                    Intent(action).setType(mime).setPackage(context.packageName),
++                    PackageManager.MATCH_DEFAULT_ONLY
++                )
++                assertTrue("Missing share registration: $action $mime", matches.any {
++                    it.activityInfo.name == RouteActivity::class.java.name
++                })
++            }
++        }
++    }
++}

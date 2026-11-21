@@ -21,7 +21,8 @@ import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://updates.rikka-ai.com/"
+private const val API_URL =
+    "https://github.com/abaidalgarni/rikkahub-custom/releases/latest/download/update.json"
 
 class UpdateChecker(
     private val client: OkHttpClient,

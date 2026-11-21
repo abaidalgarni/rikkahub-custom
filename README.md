@@ -1,3 +1,15 @@
+# RikkaHub Custom
+
+Personal Android build with image sharing. It installs as **RikkaHub Custom**
+(`dev.abaidalgarni.rikkahub`) alongside the official app.
+
+- Share one or several images from Gallery, My Files, or another Android app into a chat draft.
+- Keep text captions and preview attachments before sending.
+- Receive signed custom updates that reapply the changes to upstream stable releases.
+
+See [custom build and update instructions](custom/README.md) and [changes](CHANGELOG.md).
+The upstream project documentation follows below.
+
 <div align="center">
   <img src="docs/icon.png" alt="App Icon" width="100" />
   <h1>RikkaHub</h1>

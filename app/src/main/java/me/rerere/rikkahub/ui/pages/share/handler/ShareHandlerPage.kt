@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,7 +37,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
 @Composable
-fun ShareHandlerPage(text: String, image: String?) {
+fun ShareHandlerPage(text: String, images: List<String>) {
     val vm: ShareHandlerVM = koinViewModel(parameters = { parametersOf(text) })
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -69,11 +70,11 @@ fun ShareHandlerPage(text: String, image: String?) {
                             style = MaterialTheme.typography.bodySmall
                         )
 
-                        image?.let {
+                        images.forEachIndexed { index, image ->
                             AsyncImage(
-                                model = it,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxWidth()
+                                model = image,
+                                contentDescription = "Shared image ${index + 1}",
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)
                             )
                         }
                     }
@@ -88,7 +89,7 @@ fun ShareHandlerPage(text: String, image: String?) {
                             navigateToChatPage(
                                 navigator = navController,
                                 initText = vm.shareText.base64Encode(),
-                                initFiles = image?.let { listOf(it.toUri()) } ?: emptyList()
+                                initFiles = images.map { it.toUri() }
                             )
                         }
                     },
