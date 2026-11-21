@@ -4,6 +4,8 @@
 
 - Use the available debug JVM test task in the hosted release workflow. The release
   APK and Android sharing checks remain separate build steps.
+- Build an unsigned APK when no local keystore is configured, so signing credentials
+  remain confined to the publishing job.
 
 ## 3.3.0-custom.2 - 2026-11-21
 

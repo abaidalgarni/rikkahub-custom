@@ -15,6 +15,8 @@ function replaceOnce(before, after) {
   text = text.replace(before, after);
 }
 replaceOnce('        applicationId = "me.rerere.rikkahub"', '        applicationId = "dev.abaidalgarni.rikkahub"');
+replaceOnce('            signingConfig = signingConfigs.getByName("release")',
+  '            signingConfig = signingConfigs.getByName("release").takeIf { it.storeFile != null }');
 const versions = [...text.matchAll(/^        versionName = "([^"]+)"$/gm)];
 if (versions.length !== 1 || !/^\d+\.\d+\.\d+$/.test(versions[0][1])) throw new Error('Unsupported upstream version');
 replaceOnce(versions[0][0], `${versions[0][0]}
