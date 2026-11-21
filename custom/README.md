@@ -60,7 +60,7 @@ and pnpm 11. Install `web-ui` dependencies with `pnpm install --frozen-lockfile`
 From the project root:
 
 ```sh
-gradle :app:assembleGithubRelease :app:testGithubReleaseUnitTest -PcustomRevision=2
+gradle :app:assembleGithubRelease :app:testGithubDebugUnitTest -PcustomRevision=2
 gradle :app:connectedGithubDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.SharedImagesTest
 ```
 

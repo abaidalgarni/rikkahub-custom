@@ -94,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           date -u +%Y-%m-%dT%H:%M:%SZ > ../cx_build_start.txt
-          gradle :app:assembleGithubRelease :app:testGithubReleaseUnitTest --no-daemon --max-workers=2 --console=plain -Dorg.gradle.jvmargs=-Xmx6g -PcustomRevision="$CUSTOM_REVISION" 2>&1 | tee ../cx_build.log
+          gradle :app:assembleGithubRelease :app:testGithubDebugUnitTest --no-daemon --max-workers=2 --console=plain -Dorg.gradle.jvmargs=-Xmx6g -PcustomRevision="$CUSTOM_REVISION" 2>&1 | tee ../cx_build.log
           echo RUN_COMPLETE >> ../cx_build.log
       - name: Enable emulator acceleration
         if: steps.upstream.outputs.publish == 'true'

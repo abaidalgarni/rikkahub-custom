@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.3.0-custom.3 - 2026-11-21
+
+- Use the available debug JVM test task in the hosted release workflow. The release
+  APK and Android sharing checks remain separate build steps.
+
 ## 3.3.0-custom.2 - 2026-11-21
 
 - Added Android sharing for one or multiple images, with caption support and attachment previews.
