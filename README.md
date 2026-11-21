@@ -7,6 +7,9 @@ Personal Android build with image sharing. It installs as **RikkaHub Custom**
 - Keep text captions and preview attachments before sending.
 - Receive signed custom updates that reapply the changes to upstream stable releases.
 
+Download the [latest custom release](https://github.com/abaidalgarni/rikkahub-custom/releases/latest)
+or add this repository's URL in Obtainium for updates.
+
 See [custom build and update instructions](custom/README.md) and [changes](CHANGELOG.md).
 The upstream project documentation follows below.
 

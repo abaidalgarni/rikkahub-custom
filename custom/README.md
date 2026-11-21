@@ -14,12 +14,12 @@ The selected model still needs image input support to interpret attachments.
 
 ## Updates
 
-The prepared release workflow checks upstream stable releases daily at 06:17 UTC.
+The release workflow checks upstream stable releases daily at 06:17 UTC.
 It applies `cx_image-sharing.patch`, updates the app identity and version, builds
 the app, and runs JVM and Android sharing tests. A separate job signs and publishes
 the APK only after those checks pass. A patch conflict or failed test stops the release.
 
-The intended Obtainium source is:
+The Obtainium source is:
 
 `https://github.com/abaidalgarni/rikkahub-custom`
 
@@ -27,9 +27,9 @@ The app's own update feed is:
 
 `https://github.com/abaidalgarni/rikkahub-custom/releases/latest/download/update.json`
 
-These endpoints become available after the repository and first release are published.
-Add the repository URL in Obtainium and enable background update checks. Android may
-ask you to approve installation, depending on the installer permissions and system settings.
+The repository and signed releases are public. Add the repository URL in Obtainium
+and enable background update checks. Android may ask you to approve installation,
+depending on the installer permissions and system settings.
 Use custom releases to retain image sharing.
 
 Versions use `UPSTREAM_VERSION-custom.REVISION`; Android version codes use
@@ -60,7 +60,7 @@ and pnpm 11. Install `web-ui` dependencies with `pnpm install --frozen-lockfile`
 From the project root:
 
 ```sh
-gradle :app:assembleGithubRelease :app:testGithubDebugUnitTest -PcustomRevision=2
+gradle :app:assembleGithubRelease :app:testGithubDebugUnitTest -PcustomRevision=3
 gradle :app:connectedGithubDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.SharedImagesTest
 ```
 
@@ -92,5 +92,18 @@ The 2026-11-21 local validation used a Samsung SM-S938B running Android 17:
 - Release JVM tests reported 541 passed and one skipped, with no failures.
 - Updating the custom app from revision 1 to revision 2 retained the migrated configuration.
 
-No test images were submitted to an AI provider. The GitHub-hosted workflow and
-Obtainium update path still need their first live run after publication.
+The first [GitHub-hosted release run](https://github.com/abaidalgarni/rikkahub-custom/actions/runs/44909723232)
+published `3.3.0-custom.3` after 541 JVM tests passed (one skipped) and all nine
+Android sharing tests passed. Obtainium then updated the phone from revision 2 to 3.
+The installed APK matched the published checksum and retained the signing certificate.
+Gallery sharing also passed in this published build.
+
+A fresh backup confirmed that providers, keys, models, assistants, search services,
+and MCP settings were preserved. Conversation and message records matched the
+original backup exactly. Runtime changes were limited to the launch count, backup
+time, and one refreshed Firecrawl tool description. The workspace
+was recreated separately and its CLI tools were checked before the update.
+
+Obtainium is configured on the test phone to check every six hours, with background
+installs enabled and unrestricted battery use. Android may still request installation
+approval. No test images were submitted to an AI provider.
